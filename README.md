@@ -3,10 +3,9 @@
 Backend for a project-management platform — issues, sprints, a configurable workflow engine,
 real-time board updates, search, and collaboration.
 
-
 ## Highlights
 
-- **Hexagonal architecture** — framework-free domain, ports & adapters ([ADR-0001](docs/adr/0001-hexagonal-architecture.md))
+- **Hexagonal architecture** — framework-free domain, ports & adapters
 - **CQRS** — denormalized board read model kept in sync by domain events
 - **Transactional outbox** — every mutation emits ordered, replayable events (activity feed,
   notifications, WebSocket)
@@ -56,7 +55,7 @@ The core is built and **tested end-to-end** (32 tests); the remaining capabiliti
 
 | Concern | Choice |
 |---------|--------|
-| Language / Build | Java 21, Maven (Spring Boot 3.5.x — see [ADR-0002](docs/adr/0002-spring-boot-3.5-over-4.0.md)) |
+| Language / Build | Java 21, Maven (Spring Boot 3.5.x — see [decisions](docs/decisions.md)) |
 | Web / API | Spring MVC, springdoc-openapi (Swagger UI) |
 | Persistence | PostgreSQL + Flyway, Spring Data JPA |
 | Cache / pub-sub | Redis (Spring Data Redis) |
@@ -130,7 +129,5 @@ k6 run load-test/board-load.js     # 100 concurrent board viewers
 
 | Doc | Purpose |
 |-----|---------|
-| [docs/architecture/hld.md](docs/architecture/hld.md) | High-level design |
-| [docs/architecture/data-model.md](docs/architecture/data-model.md) | Schema & ERD |
-| [docs/adr/](docs/adr/) | Architecture Decision Records |
-| [docs/lld/](docs/lld/) | Low-level designs per subsystem |
+| [docs/hld.md](docs/hld.md) | High-level design — architecture, data model, subsystems, scaling |
+| [docs/decisions.md](docs/decisions.md) | Key design decisions and the reasoning behind them |

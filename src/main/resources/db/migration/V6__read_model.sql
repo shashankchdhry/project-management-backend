@@ -1,4 +1,4 @@
--- CQRS read model: denormalized, board-optimized projection of issues (docs/adr/0005).
+-- CQRS read model: denormalized, board-optimized projection of issues.
 -- Maintained by event projectors; the board query reads this single table.
 
 CREATE TABLE issue_board_view (
