@@ -1,0 +1,99 @@
+# =============================================================================
+# Base configuration. All environment-specific values are overridable via env
+# vars so the SAME config runs locally (defaults) and in Docker Compose
+# (DB_HOST=postgres, REDIS_HOST=redis, ...).
+# =============================================================================
+spring:
+  application:
+    name: jira-backend
+
+  # Drain in-flight HTTP requests + WebSocket sessions before exit.
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:jira}
+    username: ${DB_USER:jira}
+    password: ${DB_PASSWORD:jira}
+    hikari:
+      pool-name: jira-cp
+      maximum-pool-size: ${DB_POOL_MAX:20}
+      minimum-idle: ${DB_POOL_MIN:5}
+      connection-timeout: 30000
+
+  jpa:
+    open-in-view: false          # no lazy loading in the view layer; explicit fetch only
+    hibernate:
+      ddl-auto: validate         # Flyway owns the schema; Hibernate only validates it
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+      repositories:
+        enabled: false   # Redis is used for cache/pub-sub, not Spring Data repositories
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+# ----- Actuator: health probes + Prometheus metrics -----
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true            # exposes /actuator/health/{liveness,readiness}
+      show-details: always       # dev-friendly; tightened under security later
+      group:
+        readiness:
+          include: readinessState,db,redis
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true   # latency percentiles for req. 8
+
+# ----- OpenAPI / Swagger UI -----
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+# ----- Resilience4j: notification service circuit breaker -----
+resilience4j:
+  circuitbreaker:
+    instances:
+      notification:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        register-health-indicator: false   # an open breaker must NOT fail readiness
+
+# ----- Application: auth + rate limiting -----
+app:
+  jwt:
+    secret: ${JWT_SECRET:demo-secret-please-override-in-prod-min-32-bytes-long-key}
+    expiry-minutes: ${JWT_EXPIRY_MIN:120}
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    requests-per-minute: ${RATE_LIMIT_RPM:300}
+
+# Simulate the external notification service being down (used to demonstrate the circuit breaker in tests).
+notification:
+  simulate-failure: ${NOTIFICATION_SIMULATE_FAILURE:false}

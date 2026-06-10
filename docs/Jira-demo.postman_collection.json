@@ -1,0 +1,324 @@
+{
+  "info": {
+    "name": "Jira Backend — Demo Walkthrough",
+    "description": "End-to-end demo of the project-management backend, grouped into folders. Run top-to-bottom (or Run Collection) — they run in order. Scripts auto-capture: login → {{token}}, create issue → {{issueKey}}/{{issueId}}, list sprints → {{activeSprintId}}, create sprint → {{sprintId}}; so nothing is hard-coded between steps. Collection-level auth is Bearer {{token}}; anonymous requests (401 probe, health, metrics) override to No Auth. The Sprints folder assumes a fresh seed (Sprint 1 ACTIVE) — `docker compose down -v` for a pristine run.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [ { "key": "token", "value": "{{token}}", "type": "string" } ]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080", "type": "string" },
+    { "key": "token", "value": "", "type": "string" },
+    { "key": "issueKey", "value": "", "type": "string" },
+    { "key": "issueId", "value": "", "type": "string" },
+    { "key": "memberId", "value": "d0000000-0000-0000-0000-0000000000a3", "type": "string" },
+    { "key": "activeSprintId", "value": "d0000000-0000-0000-0000-000000000040", "type": "string" },
+    { "key": "sprintId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1 · Auth & Security",
+      "description": "Get a JWT and prove unauthenticated access is rejected.",
+      "item": [
+        {
+          "name": "1.1 Login (member) → capture JWT",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.collectionVariables.set('token', body.token);",
+              "console.log('Captured token for', body.displayName, body.userId);"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"member@demo.test\",\n  \"password\": \"password\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/login", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "auth", "login" ] },
+            "description": "Logins (password 'password'): member@demo.test, lead@demo.test, admin@demo.test. Stores the JWT in {{token}} for every other request."
+          }
+        },
+        {
+          "name": "1.2 Board WITHOUT token → 401",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('401 Unauthorized — security is enforced', () => pm.response.to.have.status(401));"
+            ] } }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/v1/projects/WEB/board", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "projects", "WEB", "board" ] },
+            "description": "Auth is explicitly disabled on THIS request (No Auth) to prove unauthenticated access is rejected."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2 · Board & Issues",
+      "description": "The CQRS board, issue creation, the workflow guard, and optimistic locking.",
+      "item": [
+        {
+          "name": "2.1 Board (CQRS read model)",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [ "pm.test('200 OK', () => pm.response.to.have.status(200));" ] } } ],
+          "request": {
+            "method": "GET", "header": [],
+            "url": { "raw": "{{baseUrl}}/api/v1/projects/WEB/board", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "projects", "WEB", "board" ] },
+            "description": "Seeded board: WEB-1/2/3 across To Do / In Progress / Done. Served from the CQRS read model."
+          }
+        },
+        {
+          "name": "2.2 Create issue → capture key + id",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('201 Created', () => pm.response.to.have.status(201));",
+              "const body = pm.response.json();",
+              "pm.collectionVariables.set('issueKey', body.key);",
+              "pm.collectionVariables.set('issueId', body.id);",
+              "pm.test('version is 0 on a fresh issue', () => pm.expect(body.version).to.eql(0));",
+              "console.log('Created', body.key, '(' + body.id + ') at version', body.version);"
+            ] } }
+          ],
+          "request": {
+            "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"STORY\",\n  \"title\": \"Live demo issue\",\n  \"priority\": \"HIGH\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/api/v1/projects/WEB/issues", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "projects", "WEB", "issues" ] },
+            "description": "Reporter is taken from the JWT. Captures the new key into {{issueKey}} and the UUID into {{issueId}} for later steps."
+          }
+        },
+        {
+          "name": "2.3 Illegal transition (To Do → Done) → 422",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('422 Unprocessable Entity', () => pm.response.to.have.status(422));",
+              "pm.test('body lists allowedTransitions', () => pm.expect(pm.response.json()).to.have.property('allowedTransitions'));"
+            ] } }
+          ],
+          "request": {
+            "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"to\": \"Done\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/api/v1/issues/{{issueKey}}/transitions", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "issues", "{{issueKey}}", "transitions" ] },
+            "description": "Workflow guard rejects skipping straight to Done. Returns problem+json with allowedTransitions: [\"In Progress\"]."
+          }
+        },
+        {
+          "name": "2.4 Assign to self (PATCH, version 0)",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "console.log('New version after assign:', pm.response.json().version);"
+          ] } } ],
+          "request": {
+            "method": "PATCH", "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"version\": 0,\n  \"assigneeId\": \"{{memberId}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/api/v1/issues/{{issueKey}}", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "issues", "{{issueKey}}" ] },
+            "description": "Optimistic-locked PATCH: we send the expected version (0). On success the issue moves to version 1."
+          }
+        },
+        {
+          "name": "2.5 Valid transition (→ In Progress)",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [ "pm.test('200 OK — guard passes', () => pm.response.to.have.status(200));" ] } } ],
+          "request": {
+            "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"to\": \"In Progress\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/api/v1/issues/{{issueKey}}/transitions", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "issues", "{{issueKey}}", "transitions" ] },
+            "description": "Now a legal transition: To Do → In Progress succeeds."
+          }
+        },
+        {
+          "name": "2.6 Stale version (PATCH version 999) → 409",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
+            "pm.test('body carries authoritative current state', () => pm.expect(pm.response.json()).to.have.property('current'));"
+          ] } } ],
+          "request": {
+            "method": "PATCH", "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"version\": 999,\n  \"title\": \"nope\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/api/v1/issues/{{issueKey}}", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "issues", "{{issueKey}}" ] },
+            "description": "Submitting a stale version triggers an optimistic-lock conflict. The 409 body includes 'current' so a client can merge."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3 · Activity & Search",
+      "description": "Activity feed and full-text/structured search, both cursor-paginated.",
+      "item": [
+        {
+          "name": "3.1 Activity feed (project)",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [ "pm.test('200 OK', () => pm.response.to.have.status(200));" ] } } ],
+          "request": {
+            "method": "GET", "header": [],
+            "url": { "raw": "{{baseUrl}}/api/v1/projects/WEB/activity?limit=20", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "projects", "WEB", "activity" ], "query": [ { "key": "limit", "value": "20" } ] },
+            "description": "Paginated event stream for the project — includes the create + transition you just performed. Optional filters: ?type=<EventType>&issueId=<uuid>&cursor=<opaque>."
+          }
+        },
+        {
+          "name": "3.2 Activity feed — filtered by issue",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [ "pm.test('200 OK', () => pm.response.to.have.status(200));" ] } } ],
+          "request": {
+            "method": "GET", "header": [],
+            "url": { "raw": "{{baseUrl}}/api/v1/projects/WEB/activity?issueId={{issueId}}", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "projects", "WEB", "activity" ], "query": [ { "key": "issueId", "value": "{{issueId}}" } ] },
+            "description": "Same feed scoped to the issue we created (uses the captured {{issueId}} UUID)."
+          }
+        },
+        {
+          "name": "3.3 Search — full-text (q=oauth)",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [ "pm.test('200 OK', () => pm.response.to.have.status(200));" ] } } ],
+          "request": {
+            "method": "GET", "header": [],
+            "url": { "raw": "{{baseUrl}}/api/v1/search?q=oauth", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "search" ], "query": [ { "key": "q", "value": "oauth" } ] },
+            "description": "Postgres full-text search scoped to the caller's projects."
+          }
+        },
+        {
+          "name": "3.4 Search — filter (status=In Progress)",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [ "pm.test('200 OK', () => pm.response.to.have.status(200));" ] } } ],
+          "request": {
+            "method": "GET", "header": [],
+            "url": { "raw": "{{baseUrl}}/api/v1/search?status=In Progress", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "search" ], "query": [ { "key": "status", "value": "In Progress" } ] },
+            "description": "Structured filter. Postman URL-encodes the space automatically."
+          }
+        },
+        {
+          "name": "3.5 Search — cursor pagination (limit=2)",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "const p = pm.response.json().page;",
+            "if (p) console.log('nextCursor:', p.nextCursor, 'hasMore:', p.hasMore);"
+          ] } } ],
+          "request": {
+            "method": "GET", "header": [],
+            "url": { "raw": "{{baseUrl}}/api/v1/search?limit=2", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "search" ], "query": [ { "key": "limit", "value": "2" } ] },
+            "description": "Keyset (cursor) pagination — note page.nextCursor. Feed it back as ?cursor=... for the next page."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4 · Sprints",
+      "description": "Sprint lifecycle: list, create, the 'one active sprint' guard (422), complete (velocity + carry-over), start, and assigning an issue to a sprint. Assumes a fresh seed (Sprint 1 ACTIVE); the complete step auto-targets whatever sprint is currently ACTIVE, so it also survives re-runs.",
+      "item": [
+        {
+          "name": "4.1 List sprints → capture active sprint",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "const active = pm.response.json().find(s => s.state === 'ACTIVE');",
+            "if (active) { pm.collectionVariables.set('activeSprintId', active.id); console.log('Active sprint:', active.name, active.id); }",
+            "else console.log('No ACTIVE sprint found — complete step may 422.');"
+          ] } } ],
+          "request": {
+            "method": "GET", "header": [],
+            "url": { "raw": "{{baseUrl}}/api/v1/projects/WEB/sprints", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "projects", "WEB", "sprints" ] },
+            "description": "Lists the project's sprints. Seeded with 'Sprint 1' (ACTIVE). The script stores the currently-ACTIVE sprint id in {{activeSprintId}} so the complete step always targets the right one."
+          }
+        },
+        {
+          "name": "4.2 Create sprint → capture id",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('201 Created', () => pm.response.to.have.status(201));",
+            "const body = pm.response.json();",
+            "pm.collectionVariables.set('sprintId', body.id);",
+            "pm.test('starts in PLANNED state', () => pm.expect(body.state).to.eql('PLANNED'));",
+            "console.log('Created sprint', body.name, body.id, '(' + body.state + ')');"
+          ] } } ],
+          "request": {
+            "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"projectKey\": \"WEB\",\n  \"name\": \"Demo Sprint\",\n  \"goal\": \"Sprint lifecycle walkthrough\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/api/v1/sprints", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "sprints" ] },
+            "description": "Creates a new PLANNED sprint and captures its id into {{sprintId}}."
+          }
+        },
+        {
+          "name": "4.3 Start while one is ACTIVE → 422 (guard)",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('422 — only one active sprint per project', () => pm.response.to.have.status(422));"
+          ] } } ],
+          "request": {
+            "method": "POST", "header": [],
+            "url": { "raw": "{{baseUrl}}/api/v1/sprints/{{sprintId}}/start", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "sprints", "{{sprintId}}", "start" ] },
+            "description": "Demonstrates the business rule: a project may have only one ACTIVE sprint. Since Sprint 1 is already active, starting the new one is rejected with 422 (advisory-locked)."
+          }
+        },
+        {
+          "name": "4.4 Complete the ACTIVE sprint",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "console.log('Velocity:', pm.response.json().velocity, '| carried over:', pm.response.json().carriedOverIssueIds);"
+          ] } } ],
+          "request": {
+            "method": "POST", "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"carryOverIssueIds\": []\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/api/v1/sprints/{{activeSprintId}}/complete", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "sprints", "{{activeSprintId}}", "complete" ] },
+            "description": "Completes the currently-active sprint: computes velocity from DONE issues and carries over the selected incomplete ones (none here). Frees the active slot. Body may also include targetSprintId to carry issues forward."
+          }
+        },
+        {
+          "name": "4.5 Start the new sprint (now succeeds)",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "pm.test('now ACTIVE', () => pm.expect(pm.response.json().state).to.eql('ACTIVE'));"
+          ] } } ],
+          "request": {
+            "method": "POST", "header": [],
+            "url": { "raw": "{{baseUrl}}/api/v1/sprints/{{sprintId}}/start", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "sprints", "{{sprintId}}", "start" ] },
+            "description": "With the previous sprint completed, the new sprint can now be started → ACTIVE."
+          }
+        },
+        {
+          "name": "4.6 Move issue into the sprint",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "pm.test('issue now in the new sprint', () => pm.expect(pm.response.json().sprintId).to.eql(pm.collectionVariables.get('sprintId')));"
+          ] } } ],
+          "request": {
+            "method": "PUT", "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"sprintId\": \"{{sprintId}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/api/v1/issues/{{issueKey}}/sprint", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "issues", "{{issueKey}}", "sprint" ] },
+            "description": "Assigns our demo issue to the new sprint. Send {\"sprintId\": null} to move an issue back to the backlog."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5 · Realtime & Observability",
+      "description": "WebSocket missed-event replay and the actuator health/metrics endpoints.",
+      "item": [
+        {
+          "name": "5.1 Missed-event replay (after=0)",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [ "pm.test('200 OK', () => pm.response.to.have.status(200));" ] } } ],
+          "request": {
+            "method": "GET", "header": [],
+            "url": { "raw": "{{baseUrl}}/api/v1/projects/WEB/events?after=0", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "projects", "WEB", "events" ], "query": [ { "key": "after", "value": "0" } ] },
+            "description": "WebSocket catch-up endpoint: returns every event with seq > after so a reconnecting client can replay what it missed."
+          }
+        },
+        {
+          "name": "5.2 Health",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "pm.test('status UP', () => pm.expect(pm.response.json().status).to.eql('UP'));"
+          ] } } ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET", "header": [],
+            "url": { "raw": "{{baseUrl}}/actuator/health", "host": [ "{{baseUrl}}" ], "path": [ "actuator", "health" ] },
+            "description": "Liveness/readiness — db and redis should both be UP."
+          }
+        },
+        {
+          "name": "5.3 Prometheus metrics",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET", "header": [],
+            "url": { "raw": "{{baseUrl}}/actuator/prometheus", "host": [ "{{baseUrl}}" ], "path": [ "actuator", "prometheus" ] },
+            "description": "Raw Prometheus scrape endpoint (text/plain)."
+          }
+        }
+      ]
+    }
+  ]
+}
