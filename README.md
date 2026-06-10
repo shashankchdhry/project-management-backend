@@ -3,9 +3,6 @@
 Backend for a project-management platform — issues, sprints, a configurable workflow engine,
 real-time board updates, search, and collaboration.
 
-> **Status:** Implemented and tested. The core runs end-to-end (auth → issues → workflow →
-> sprints → events → board → real-time), verified by **32 tests** (unit + Testcontainers
-> integration). The design is documented under [`docs/`](docs/).
 
 ## Highlights
 
