@@ -16,41 +16,6 @@ real-time board updates, search, and collaboration.
   notification service is down)
 - **Security** — stateless JWT auth, per-project RBAC, Redis rate limiting
 
-## Implementation status
-
-The core is built and **tested end-to-end** (32 tests); the remaining capabilities are designed in
-[`docs/`](docs/) and marked below — each row is **Built**, **Partial**, or **Designed**
-(designed, not yet implemented).
-
-| Capability | Status | Where / note |
-|------------|:------:|--------------|
-| Relational schema, migrations, demo seed | Built | `db/migration/V1–V6`, `R__seed_demo_data` |
-| Issue types + parent/child hierarchy | Built | `domain/issue` |
-| Full audit trail (event-sourced) | Built | outbox → `ActivityProjector` → `activity_log` |
-| Custom fields per project | Partial | stored as JSONB; **validation against defs** *(designed)* |
-| Configurable workflow: statuses, transitions, guards | Built | `domain/workflow`, `TransitionIssueService` |
-| Workflow auto-actions (assign reviewer, …) | Designed | modeled in `post_action`; not executed |
-| Sprints: start/complete + carry-over + velocity | Built | `SprintService` |
-| Sprint list + move issue ↔ sprint/backlog | Built | `SprintController`, `MoveIssueToSprintService` |
-| Activity feed API (paginated, filterable) | Built | `ActivityController` / `ActivityFeedService` |
-| Notifications | Partial | reporter-on-create + circuit breaker; no read API / full fan-out |
-| Threaded comments + @mentions | Designed | `comments` table; no API yet |
-| Watchers | Designed | `watchers` table; no API yet |
-| WebSocket broadcast + missed-event replay | Built | `RealtimeEventPublisher` (Redis relay), `EventReplayController` |
-| Presence tracking | Designed | designed in realtime LLD |
-| Full-text search + structured filters + cursor pagination | Built | `IssueSearchAdapter` (Postgres FTS) |
-| Hexagonal + CQRS + event-driven outbox | Built | `domain`/`application`/`adapter`; `issue_board_view` |
-| `/api/v1` versioning · RFC-9457 errors · correlation IDs | Built | `GlobalExceptionHandler`, `CorrelationIdFilter` |
-| Optimistic locking (409) | Built | `@Version` + explicit check |
-| Advisory locks (sprint ops) + WIP race | Built | `AdvisoryLockAdapter` |
-| Idempotent endpoints | Designed | `idempotency_keys` table; no handler |
-| Health probes · metrics · graceful shutdown | Built | Actuator, Micrometer, `application.yml` |
-| Structured (JSON) logging · custom metrics | Designed | correlation IDs built; JSON output + WS/outbox gauges not yet |
-| Circuit breaker (notification outage) | Built | `ExternalNotificationClient` |
-| Pooling · k6 load test · scaling doc | Built | Hikari, `load-test/`, HLD §7 |
-| Redis **board cache** | Designed | board served from the read-model table, not a cache |
-| RBAC · row-level scoping · validation · rate limiting | Built | `config/security` (**app-level** scoping; PG RLS designed) |
-
 ## Tech stack
 
 | Concern | Choice |
