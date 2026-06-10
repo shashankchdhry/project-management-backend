@@ -132,5 +132,5 @@ k6 run load-test/board-load.js     # 100 concurrent board viewers
 |-----|---------|
 | [docs/architecture/hld.md](docs/architecture/hld.md) | High-level design |
 | [docs/architecture/data-model.md](docs/architecture/data-model.md) | Schema & ERD |
-| [docs/adr/](docs/adr/) | Architecture Decision Records (the "why") |
+| [docs/adr/](docs/adr/) | Architecture Decision Records |
 | [docs/lld/](docs/lld/) | Low-level designs per subsystem |
